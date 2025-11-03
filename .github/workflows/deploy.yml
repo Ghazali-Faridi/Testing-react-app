@@ -1,51 +1,62 @@
-name: 🚀 Deploy to EC2
+name: Deploy React App to EC2
 
 on:
   push:
     branches:
-      - main
+      - main   # or master, depending on your branch
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
-      # (Optional) Build step if it’s a frontend project like React or Angular
-      - name: 🏗️ Build Project
-        run: |
-          npm install
-          npm run build
+      - name: Pull latest from main
+        run: git pull origin main
+        
+      - name: Install dependencies
+        run: npm install
 
-      # 🧳 Copy build to EC2 using SSH (Option 2 with appleboy/ssh-action)
-      - name: Move build to Nginx web root
+      - name: Build React app
+        run: npm run build
+
+      # 🧳 Copy build files to EC2 (temporary path)
+      - name: Copy build files to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_KEY }}
           source: "build/*"
           target: "/home/ubuntu/deploy_temp"
 
-      # 🚀 Execute remote commands on EC2
-      - name: Deploy on EC2 (replace old build)
+      # 🚀 Move new build to Nginx root and restart Nginx
+      - name: Move build to Nginx web root
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_KEY }}
           script: |
             echo "🚀 Moving new build to /var/www/html..."
             sudo rm -rf /var/www/html/*
             sudo cp -r /home/ubuntu/deploy_temp/* /var/www/html/
             sudo systemctl restart nginx
             echo "✅ New version deployed successfully!"
+
+      - name: Restart web server
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            sudo systemctl restart nginx || true
+            echo "✅ Deployment complete"
